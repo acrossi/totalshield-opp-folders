@@ -191,10 +191,20 @@ var CONFIG = {
 
   // Documentation stage gates. Copper handoff workflows gain a condition on these checkboxes;
   // this script ticks them when the folder earns credit. See Gates.gs and PLAN.md.
-  // ENABLE false = no evaluation. WARN_ONLY true = log only (use before editing Copper workflows).
+  // ENABLE false = no evaluation. Docs OK boxes and the Parked tab are always written when enabled; blocking
+  // only happens once Adam adds the Docs OK condition to a Copper workflow. WARN_ONLY marks log rows 'warn'
+  // so the observation period (workflows unchanged) is visible in the log.
   GATES: {
-    ENABLE: false,
-    WARN_ONLY: true,                 // strongly recommended for the first 2-3 weeks (no grandfathering; baseline ~0)
+    ENABLE: true,
+    WARN_ONLY: true,                 // observation period: boxes ticked + Parked tab, workflows not yet conditioned
+    // Copper custom field ids (informational; the script matches by name). null = id not yet supplied.
+    FIELD_IDS: {
+      'Docs OK for Production': 772791,
+      'Docs OK for Close': null,
+      'Docs OK for Complete': null,
+      'Gate Override': null,
+      'Installed by TotalShield': null
+    },
     // Override: honored for everyone who can tick it, because Copper's API does not say who edited a field.
     // Only these Copper users are allowed to tick it (Adam Rossi, Carin Charon, Isabel Silva); every
     // override is logged with the opportunity's assignee and modified date so Hanibal can audit it.
@@ -210,7 +220,10 @@ var CONFIG = {
         key: 'production',
         label: 'Docs OK for Production',
         checkboxField: 'Docs OK for Production',
-        handoffStage: 'Initial Down Payment Received',   // Sales 4424598 -> workflow moves to Production
+        // Copper workflow "Move a Initiated Sale to Production": Pipeline=Sales AND Stage=Initial Down Payment
+        // Received -> Production / Production Initiation. Add condition: Docs OK for Production checked.
+        handoffPipeline: 'Sales',
+        handoffStage: 'Initial Down Payment Received',
         // Partial at this point: requirements, model, quote, PO. 00/01/03 recommended only (listed in nudges).
         requiredFolders: ['02_REQUIREMENTS', '04_MODEL', '05_QUOTE', '06_PURCHASE_ORDER'],
         recommendedFolders: ['00_CUSTOMER_DOCS', '01_CLIENT_INTAKE', '03_ANALYSIS']
@@ -219,7 +232,11 @@ var CONFIG = {
         key: 'close',
         label: 'Docs OK for Close',
         checkboxField: 'Docs OK for Close',
-        handoffStage: 'Customer Installation Support',   // Production 4394767 (final stage) -> Closed / All Payments Received; confirm in Copper
+        // Not stage-driven: Copper workflow "New Workflow Automation" fires when checkbox Project Completed (Archive)
+        // (732093) is ticked and moves the deal to Closed Projects / All Payments Received. Add condition:
+        // Docs OK for Close checked. Parked = still in Production with that checkbox ticked.
+        handoffPipeline: 'Production',
+        handoffField: 'Project Completed (Archive)',
         requiredFolders: ['02_REQUIREMENTS', '03_ANALYSIS', '04_MODEL', '05_QUOTE', '06_PURCHASE_ORDER', '08_DELIVERABLES'],
         recommendedFolders: ['00_CUSTOMER_DOCS', '01_CLIENT_INTAKE'],
         requiredWhenInstalled: ['09_INSTALLATION']
@@ -228,7 +245,9 @@ var CONFIG = {
         key: 'complete',
         label: 'Docs OK for Complete',
         checkboxField: 'Docs OK for Complete',
-        handoffStage: 'Folder Review',                   // Closed 5191144 -> Workflow C sets Project Complete (hard gate)
+        // New Workflow C (to be created): Stage=Folder Review AND Docs OK for Complete -> Project Complete.
+        handoffPipeline: 'Closed Projects',
+        handoffStage: 'Folder Review',
         requiredFolders: [],
         requireScore100: true
       }

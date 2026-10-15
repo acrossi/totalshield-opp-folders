@@ -6,7 +6,9 @@
  * checkboxes: it inventories the Drive folder, evaluates CONFIG.GATES, and ticks/unticks the boxes.
  * Deals that fail a gate simply stay at the handoff stage — nothing is moved backward.
  *
- * Enable with CONFIG.GATES.ENABLE. WARN_ONLY logs evaluations without writing Copper.
+ * Enable with CONFIG.GATES.ENABLE. Boxes are written in WARN_ONLY too (harmless until the workflows carry
+ * the condition); WARN_ONLY only tags log rows. A Copper field-updated workflow fires on the API checkbox
+ * write itself (tested 15 Oct, ~16 s), so no extra re-save is needed.
  * See /workspace/gates/PLAN.md (or the vault mirror) for the rollout steps Adam runs in Copper.
  */
 
@@ -49,9 +51,17 @@ function gateRecommendedMissing_(gate, inventory) {
   return (gate.recommendedFolders || []).filter(function (f) { return !folderCredited_(inventory, f); });
 }
 
-/** Pure: gate whose handoff stage the deal is sitting at, or null. */
-function gateForHandoffStage_(stageName) {
-  return (CONFIG.GATES.GATES || []).filter(function (g) { return g.handoffStage === stageName; })[0] || null;
+/**
+ * Pure: the gate a deal is parked at, or null. Stage-driven gates match pipeline + stage; the Close gate
+ * matches pipeline Production + its handoffField checkbox (Project Completed (Archive)) ticked.
+ */
+function gateParkedAt_(pipelineName, stageName, fieldValues) {
+  fieldValues = fieldValues || {};
+  return (CONFIG.GATES.GATES || []).filter(function (g) {
+    if (g.handoffPipeline && g.handoffPipeline !== pipelineName) return false;
+    if (g.handoffField) return !!fieldValues[g.handoffField];
+    return !!g.handoffStage && g.handoffStage === stageName;
+  })[0] || null;
 }
 
 /** Pure: is this Copper user allowed to set Gate Override? */
@@ -209,15 +219,17 @@ function applyDocumentationGates_(opp, inventory, looseFiles) {
     logRow_('gate', [opp.id, r.passed ? 'pass' : 'fail', r.key, pipelineName, stageName,
       r.missing.length ? ('missing: ' + r.missing.join(', ')) : (r.score != null ? ('score ' + r.score) : 'ok')]);
   });
-  var parked = parkedEntry_(opp, stageName, results, inventory, override);
+  var handoffFields = {};
+  (CONFIG.GATES.GATES || []).forEach(function (g) {
+    if (g.handoffField) { try { handoffFields[g.handoffField] = !!copperFieldValue_(opp, g.handoffField); } catch (e) {} }
+  });
+  var parked = parkedEntry_(opp, pipelineName, stageName, handoffFields, results, inventory, override);
+  if (parked) logRow_('gate', [opp.id, CONFIG.GATES.WARN_ONLY ? 'parked_warn' : 'parked', parked.gate, pipelineName, stageName, 'missing: ' + parked.missing]);
 
-  if (CONFIG.GATES.WARN_ONLY) {
-    return { results: results, wrote: false, override: override, installed: installed, parked: parked };
-  }
   var map = gateCheckboxMap_(results, override, { pipelineName: pipelineName, stageName: stageName });
   try {
     var fields = copperCustomFields_(map);
-    if (fields.length) copperUpdateOpportunity_(opp.id, { custom_fields: fields });   // re-save = workflow re-trigger (test!)
+    if (fields.length) copperUpdateOpportunity_(opp.id, { custom_fields: fields });   // field-updated workflows fire on this write
   } catch (err) {
     logRow_('error', [opp.id, 'gate write-back', String(err)]);
     return { results: results, wrote: false, override: override, installed: installed, parked: parked, error: String(err) };
@@ -225,16 +237,16 @@ function applyDocumentationGates_(opp, inventory, looseFiles) {
   return { results: results, wrote: true, override: override, installed: installed, parked: parked, checkboxes: map };
 }
 
-/** Parked row (deal at a handoff stage failing that gate), or null. Shape matches the Parked tab. */
-function parkedEntry_(opp, stageName, results, inventory, override) {
-  var gate = gateForHandoffStage_(stageName);
+/** Parked row (deal at a handoff failing that gate), or null. Shape matches the Parked tab. */
+function parkedEntry_(opp, pipelineName, stageName, handoffFields, results, inventory, override) {
+  var gate = gateParkedAt_(pipelineName, stageName, handoffFields);
   if (!gate || override) return null;
   var r = results.filter(function (x) { return x.key === gate.key; })[0];
   if (!r || r.passed) return null;
   var owner = oppOwner_(opp), folder = null;
   try { folder = findOppFolder_(opp); } catch (e) {}
   return { oppId: opp.id, name: opp.name, owner: owner.name, ownerEmail: owner.email, gate: gate.label,
-           stage: stageName, missing: r.missing.join(', '),
+           stage: gate.handoffField ? stageName + ' (' + gate.handoffField + ' ticked)' : stageName, missing: r.missing.join(', '),
            recommended: gateRecommendedMissing_(gate, inventory).join(', '),
            folderUrl: folder ? folder.getUrl() : '', copperUrl: copperOppUrl_(opp.id) };
 }
@@ -263,20 +275,27 @@ function sweepParkedDeals() {
   if (Date.now() - last < 15 * 60000) return null;
   props.setProperty('parkedSweepAt', String(Date.now()));
 
-  var stageIds = [];
-  var pipes = copperPipelines_().byId;
-  Object.keys(pipes).forEach(function (pid) {
-    (pipes[pid].stages || []).forEach(function (st) { if (gateForHandoffStage_(st.name)) stageIds.push(st.id); });
+  // Candidates: deals at a stage-driven handoff stage, plus every Production deal (filtered by the field gate).
+  var pipes = copperPipelines_(), stageIds = [], pipelineIds = [];
+  (CONFIG.GATES.GATES || []).forEach(function (g) {
+    var p = pipes.byName[g.handoffPipeline];
+    if (!p) return;
+    if (g.handoffField) { pipelineIds.push(p.id); return; }
+    (p.stages || []).forEach(function (st) { if (st.name === g.handoffStage) stageIds.push(st.id); });
   });
-  if (!stageIds.length) return null;
+  var cands = [];
+  if (stageIds.length) cands = cands.concat(copperSearchOpportunities_({ pipeline_stage_ids: stageIds }, 10));
+  if (pipelineIds.length) cands = cands.concat(copperSearchOpportunities_({ pipeline_ids: pipelineIds }, 10));
+  var seen = {};
+  cands = cands.filter(function (o) { if (seen[o.id]) return false; seen[o.id] = true; return true; });
 
   var sh = logSheet_(CONFIG.GATES.PARKED_SHEET, PARKED_HEADERS_);
   var prev = {};
   sh.getDataRange().getValues().slice(1).forEach(function (row) { prev[row[1]] = row[11]; });   // opp_id -> first_parked
 
   var rows = [];
-  copperSearchOpportunities_({ pipeline_stage_ids: stageIds }, 10).forEach(function (o) {
-    if (o.status !== 'Open') return;
+  cands.forEach(function (o) {
+    if (CONFIG.LOST_STATUSES.indexOf(o.status) !== -1) return;   // Production deals are usually status Won
     try {
       var res = maybeApplyDocumentationGates_(o);
       var p = res && res.parked;

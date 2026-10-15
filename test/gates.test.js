@@ -100,17 +100,21 @@ eq(ctx.detectGateBypass_('Production', failResults, true), [], 'override suppres
 eq(ctx.detectGateBypass_('Production', ctx.evaluateAllGates_(salesReady, {}), false), [], 'no bypass when production gate passes');
 
 // handoff stages, override users
-eq(ctx.gateForHandoffStage_('Initial Down Payment Received').key, 'production', 'handoff production');
-eq(ctx.gateForHandoffStage_('Customer Installation Support').key, 'close', 'handoff close');
-eq(ctx.gateForHandoffStage_('Folder Review').key, 'complete', 'handoff complete');
-eq(ctx.gateForHandoffStage_('Producing Product'), null, 'not a handoff stage');
+eq(ctx.gateParkedAt_('Sales', 'Initial Down Payment Received').key, 'production', 'parked: production handoff');
+eq(ctx.gateParkedAt_('Production', 'Initial Down Payment Received'), null, 'stage name alone in wrong pipeline is not a handoff');
+eq(ctx.gateParkedAt_('Production', 'Customer Installation Support'), null, 'close gate is not stage-driven');
+eq(ctx.gateParkedAt_('Production', 'Waiting on 2nd Payment', { 'Project Completed (Archive)': true }).key, 'close', 'parked: Production + archive ticked');
+eq(ctx.gateParkedAt_('Production', 'Producing Product', { 'Project Completed (Archive)': false }), null, 'Production without archive tick not parked');
+eq(ctx.gateParkedAt_('Closed Projects', 'Folder Review').key, 'complete', 'parked: Folder Review');
+eq(ctx.gateParkedAt_('Closed Projects', 'All Payments Received', { 'Project Completed (Archive)': true }), null, 'already Closed is not parked at close');
+eq(ctx.CONFIG.GATES.FIELD_IDS['Docs OK for Production'], 772791, 'Docs OK for Production field id');
 eq([984268, 991740, 993457].map(ctx.overrideUserAllowed_), [true, true, true], 'Adam, Carin, Isabel may override');
 eq(ctx.overrideUserAllowed_(1061440), false, 'others may not override');
 eq(typeof ctx.grandfatherGateCheckboxes, 'undefined', 'grandfather helper removed');
 
 // config wiring
 eq(ctx.CONFIG.CF_DOCS_OK_PRODUCTION, 'Docs OK for Production', 'CF label production');
-eq(ctx.CONFIG.GATES.ENABLE, false, 'gates disabled by default');
+eq(ctx.CONFIG.GATES.ENABLE, true, 'gates enabled for observation');
 eq(ctx.CONFIG.GATES.WARN_ONLY, true, 'warn-only default for rollout');
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS');
