@@ -44,6 +44,11 @@ var CONFIG = {
   CF_PROJECT_COMPLETED: 'Project Completed (Archive)',
   CF_DOC_SCORE: 'Opportunity Documentation Score',   // create this (Number) in Copper before enabling scoring
   CF_HIST_OWNER: 'Historical Owner',                 // text field: who really ran old records whose Copper assignee is empty (e.g. departed employees)
+  // Documentation stage gates (Checkbox fields — create in Copper before ENABLE; script is the writer of Docs OK_*)
+  CF_DOCS_OK_PRODUCTION: 'Docs OK for Production',
+  CF_DOCS_OK_CLOSE: 'Docs OK for Close',
+  CF_DOCS_OK_COMPLETE: 'Docs OK for Complete',
+  CF_GATE_OVERRIDE: 'Gate Override',                 // managers only; forces all Docs OK true
 
   // Product code map: dropdown option name -> short code
   PRODUCT_CODES: {
@@ -182,7 +187,53 @@ var CONFIG = {
 
   // Penalty per loose file left at the folder root (0 = disabled; decided 28 Aug 2026)
   LOOSE_FILE_PENALTY: 0,
-  LOOSE_FILE_PENALTY_CAP: 10
+  LOOSE_FILE_PENALTY_CAP: 10,
+
+  // Documentation stage gates. Copper handoff workflows gain a condition on these checkboxes;
+  // this script ticks them when the folder earns credit. See Gates.gs and PLAN.md.
+  // ENABLE false = no evaluation. WARN_ONLY true = log only (use before editing Copper workflows).
+  GATES: {
+    ENABLE: false,
+    WARN_ONLY: true,                 // strongly recommended for the first 2-3 weeks (no grandfathering; baseline ~0)
+    // Override: honored for everyone who can tick it, because Copper's API does not say who edited a field.
+    // Only these Copper users are allowed to tick it (Adam Rossi, Carin Charon, Isabel Silva); every
+    // override is logged with the opportunity's assignee and modified date so Hanibal can audit it.
+    OVERRIDE_ALLOWED_USERS: { 984268: 'Adam Rossi', 991740: 'Carin Charon', 993457: 'Isabel Silva' },
+    // Parked-deal list for Hanibal's Slack nudges (#crm-bot + owner DM): log sheet tab, rewritten each sweep.
+    PARKED_SHEET: 'Parked',
+    // Installed job = Copper checkbox below ticked, OR the deal was ever seen at one of INSTALL_STAGES
+    // (remembered in Script Properties). Not "Customer Installation Support": every job passes through it.
+    CF_INSTALLED: 'Installed by TotalShield',
+    INSTALL_STAGES: ['Active Installation'],
+    GATES: [
+      {
+        key: 'production',
+        label: 'Docs OK for Production',
+        checkboxField: 'Docs OK for Production',
+        handoffStage: 'Initial Down Payment Received',   // Sales 4424598 -> workflow moves to Production
+        // Partial at this point: requirements, model, quote, PO. 00/01/03 recommended only (listed in nudges).
+        requiredFolders: ['02_REQUIREMENTS', '04_MODEL', '05_QUOTE', '06_PURCHASE_ORDER'],
+        recommendedFolders: ['00_CUSTOMER_DOCS', '01_CLIENT_INTAKE', '03_ANALYSIS']
+      },
+      {
+        key: 'close',
+        label: 'Docs OK for Close',
+        checkboxField: 'Docs OK for Close',
+        handoffStage: 'Customer Installation Support',   // Production 4394767 (final stage) -> Closed / All Payments Received; confirm in Copper
+        requiredFolders: ['02_REQUIREMENTS', '03_ANALYSIS', '04_MODEL', '05_QUOTE', '06_PURCHASE_ORDER', '08_DELIVERABLES'],
+        recommendedFolders: ['00_CUSTOMER_DOCS', '01_CLIENT_INTAKE'],
+        requiredWhenInstalled: ['09_INSTALLATION']
+      },
+      {
+        key: 'complete',
+        label: 'Docs OK for Complete',
+        checkboxField: 'Docs OK for Complete',
+        handoffStage: 'Folder Review',                   // Closed 5191144 -> Workflow C sets Project Complete (hard gate)
+        requiredFolders: [],
+        requireScore100: true
+      }
+    ]
+  }
 };
 
 function getSecret_(key) {

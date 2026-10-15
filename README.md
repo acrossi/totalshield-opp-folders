@@ -39,3 +39,5 @@ Properties and are never in this code.
 
 `node test/naming.test.js` runs the pure naming and scoring functions from
 `Config.gs`, `Naming.gs`, `Scoring.gs` and `Placement.gs` under Node.
+`node test/gates.test.js` tests the documentation stage gates (`Gates.gs`); see
+[docs/GATES-PLAN.md](docs/GATES-PLAN.md).

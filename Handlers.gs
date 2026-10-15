@@ -20,7 +20,10 @@ function doPost(e) {
         try {
           var opp = copperGetOpportunity_(id);
           syncOpportunity_(opp);
-          if (event === 'update') maybeScore_(opp);
+          if (event === 'update') {
+            // scoreOpportunity_ already applies gates; only run the gate pass when we did not score
+            if (!maybeScore_(opp)) maybeApplyDocumentationGates_(opp);
+          }
         } catch (err) { logRow_('error', [id, 'webhook ' + event, String(err)]); }
       });
     } else if (type === 'company' && event === 'update') {
@@ -81,9 +84,11 @@ function pollRecentOpportunities() {
       try {
         syncOpportunity_(o, { companyCache: cache });
         if (shouldScore_(o) && !hasScore_(o)) scoreOpportunity_(o);
+        else maybeApplyDocumentationGates_(o);
       } catch (e) { logRow_('error', [o.id, 'poll', String(e)]); }
     });
     logRow_('poll', ['synced', opps.length]);
+    try { sweepParkedDeals(); } catch (e) { logRow_('error', ['-', 'parked sweep', String(e)]); }
   } finally { lock.releaseLock(); }
 }
 
@@ -121,7 +126,8 @@ var LOG_HEADERS_ = {
   webhook: ['type', 'event', 'ids', 'updated_attributes'],
   error: ['opp_id', 'where', 'error'],
   poll: ['what', 'count'],
-  score: ['opp_id', 'folder', 'score', 'max', 'breakdown']
+  score: ['opp_id', 'folder', 'score', 'max', 'breakdown'],
+  gate: ['opp_id', 'result', 'gate_key', 'pipeline', 'stage', 'detail']
 };
 
 function logRow_(kind, cells) {

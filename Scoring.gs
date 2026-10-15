@@ -214,6 +214,7 @@ function scoreOpportunity_(opp) {
   try {
     copperUpdateOpportunity_(opp.id, { custom_fields: copperCustomFields_(objOf_(CONFIG.CF_DOC_SCORE, res.score)) });
   } catch (e) { logRow_('error', [opp.id, 'score write-back', String(e)]); }
+  try { applyDocumentationGates_(opp, inv.inventory, inv.loose); } catch (e2) { logRow_('error', [opp.id, 'gate after score', String(e2)]); }
   logRow_('score', [opp.id, folder.getName(), res.score, 100, res.breakdown.join(' | ')]);
   return res;
 }
@@ -292,6 +293,7 @@ function scoreAndReport(oppId, options) {
     logRow_('error', [opp.id, 'score write-back', String(e)]);
     if (options.fileBot) throw new Error('Copper score update failed; refresh was not completed.');
   }
+  try { applyDocumentationGates_(opp, invAll.inventory, invAll.loose); } catch (e2) { logRow_('error', [opp.id, 'gate after report', String(e2)]); }
 
   // Replace any previous report doc
   if (!options.fileBot) {
