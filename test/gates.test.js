@@ -117,5 +117,20 @@ eq(ctx.CONFIG.CF_DOCS_OK_PRODUCTION, 'Docs OK for Production', 'CF label product
 eq(ctx.CONFIG.GATES.ENABLE, true, 'gates enabled for observation');
 eq(ctx.CONFIG.GATES.WARN_ONLY, true, 'warn-only default for rollout');
 
+// gateDiffRows_: change-only gate logging
+{
+  const rows = [['fail', 'production', 'Production', 'X', 'missing: 05_QUOTE'], ['bypass', 'production', 'Production', 'X', 'd1']];
+  const a = ctx.gateDiffRows_(null, rows);
+  eq(a.changed.length, 2, 'first sight logs every row');
+  const b = ctx.gateDiffRows_(a.state, rows);
+  eq(b.changed.length, 0, 'same result+missing logs nothing');
+  const c = ctx.gateDiffRows_(b.state, [['fail', 'production', 'Production', 'Y', 'missing: 05_QUOTE'], rows[1]]);
+  eq(c.changed.length, 0, 'stage-only change is not logged');
+  const d = ctx.gateDiffRows_(c.state, [['pass', 'production', 'Production', 'X', 'ok']]);
+  eq(d.changed.map(r => r[0]), ['pass'], 'fail->pass logged');
+  const e = ctx.gateDiffRows_(d.state, [['fail', 'production', 'Production', 'X', 'missing: 02_REQUIREMENTS']]);
+  eq(e.changed.length, 1, 'missing list change logged');
+}
+
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS');
 process.exit(fails ? 1 : 0);

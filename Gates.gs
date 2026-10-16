@@ -201,10 +201,11 @@ function applyDocumentationGates_(opp, inventory, looseFiles) {
   var pipelineName = pipelineNameOf_(opp);
   var override = false;
   try { override = !!copperFieldValue_(opp, CONFIG.CF_GATE_OVERRIDE); } catch (e) {}
+  var gateRows = [];   // [result, gateKey, pipeline, stage, detail]; written only when changed (gateLogChanged_)
   if (override) {
     // Copper's API cannot say who ticked the field. Honor it, but log enough for an audit.
     var owner = oppOwner_(opp);
-    logRow_('gate', [opp.id, 'override_unverified', '-', pipelineName, stageName,
+    gateRows.push(['override_unverified', '-', pipelineName, stageName,
       'Gate Override ticked; allowed setters: ' + Object.keys(CONFIG.GATES.OVERRIDE_ALLOWED_USERS).map(function (k) { return CONFIG.GATES.OVERRIDE_ALLOWED_USERS[k]; }).join(', ') +
       '; assignee ' + owner.name + '; record modified ' + new Date((opp.date_modified || 0) * 1000).toISOString()]);
   }
@@ -212,11 +213,12 @@ function applyDocumentationGates_(opp, inventory, looseFiles) {
   var installed = installedForOpp_(opp, stageName);
   var context = { stageName: stageName, looseFiles: looseFiles || 0, installed: installed };
   var results = evaluateAllGates_(inventory, context);
-  detectGateBypass_(pipelineName, results, override).forEach(function (b) {
-    logRow_('gate', [opp.id, 'bypass', b.gateKey, pipelineName, stageName, b.detail]);
+  var bypasses = detectGateBypass_(pipelineName, results, override);
+  bypasses.forEach(function (b) {
+    gateRows.push(['bypass', b.gateKey, pipelineName, stageName, b.detail]);
   });
   results.forEach(function (r) {
-    logRow_('gate', [opp.id, r.passed ? 'pass' : 'fail', r.key, pipelineName, stageName,
+    gateRows.push([r.passed ? 'pass' : 'fail', r.key, pipelineName, stageName,
       r.missing.length ? ('missing: ' + r.missing.join(', ')) : (r.score != null ? ('score ' + r.score) : 'ok')]);
   });
   var handoffFields = {};
@@ -224,7 +226,11 @@ function applyDocumentationGates_(opp, inventory, looseFiles) {
     if (g.handoffField) { try { handoffFields[g.handoffField] = !!copperFieldValue_(opp, g.handoffField); } catch (e) {} }
   });
   var parked = parkedEntry_(opp, pipelineName, stageName, handoffFields, results, inventory, override);
-  if (parked) logRow_('gate', [opp.id, CONFIG.GATES.WARN_ONLY ? 'parked_warn' : 'parked', parked.gate, pipelineName, stageName, 'missing: ' + parked.missing]);
+  if (parked) gateRows.push([CONFIG.GATES.WARN_ONLY ? 'parked_warn' : 'parked', parked.gate, pipelineName, stageName, 'missing: ' + parked.missing]);
+  var pastGate = parked ? null : pastProductionEntry_(opp, pipelineName, stageName, bypasses, results, inventory);
+  try {
+    gateChangedRows_(opp.id, gateRows).forEach(function (row) { logRow_('gate', [opp.id].concat(row)); });
+  } catch (eLog) { logRow_('error', [opp.id, 'gate log state', String(eLog)]); }
 
   var map = gateCheckboxMap_(results, override, { pipelineName: pipelineName, stageName: stageName });
   try {
@@ -232,9 +238,9 @@ function applyDocumentationGates_(opp, inventory, looseFiles) {
     if (fields.length) copperUpdateOpportunity_(opp.id, { custom_fields: fields });   // field-updated workflows fire on this write
   } catch (err) {
     logRow_('error', [opp.id, 'gate write-back', String(err)]);
-    return { results: results, wrote: false, override: override, installed: installed, parked: parked, error: String(err) };
+    return { results: results, wrote: false, override: override, installed: installed, parked: parked, pastGate: pastGate, error: String(err) };
   }
-  return { results: results, wrote: true, override: override, installed: installed, parked: parked, checkboxes: map };
+  return { results: results, wrote: true, override: override, installed: installed, parked: parked, pastGate: pastGate, checkboxes: map };
 }
 
 /** Parked row (deal at a handoff failing that gate), or null. Shape matches the Parked tab. */
@@ -249,6 +255,63 @@ function parkedEntry_(opp, pipelineName, stageName, handoffFields, results, inve
            stage: gate.handoffField ? stageName + ' (' + gate.handoffField + ' ticked)' : stageName, missing: r.missing.join(', '),
            recommended: gateRecommendedMissing_(gate, inventory).join(', '),
            folderUrl: folder ? folder.getUrl() : '', copperUrl: copperOppUrl_(opp.id) };
+}
+
+/**
+ * Parked-tab row for a Production deal that skipped a failing production gate (logged as bypass), or null.
+ * Marked 'past production gate' so Hanibal can nudge it; drops off once the gate passes.
+ */
+function pastProductionEntry_(opp, pipelineName, stageName, bypasses, results, inventory) {
+  if (pipelineName !== CONFIG.PIPELINE_PRODUCTION) return null;
+  if (!(bypasses || []).some(function (b) { return b.gateKey === 'production'; })) return null;
+  var r = results.filter(function (x) { return x.key === 'production'; })[0];
+  if (!r || r.passed) return null;
+  var gate = (CONFIG.GATES.GATES || []).filter(function (g) { return g.key === 'production'; })[0];
+  var owner = oppOwner_(opp), folder = null;
+  try { folder = findOppFolder_(opp); } catch (e) {}
+  return { oppId: opp.id, name: opp.name, owner: owner.name, ownerEmail: owner.email,
+           gate: (gate ? gate.label : 'Docs OK for Production') + ' (past production gate)',
+           stage: stageName + ' (past production gate)', missing: r.missing.join(', '),
+           recommended: gate ? gateRecommendedMissing_(gate, inventory).join(', ') : '',
+           folderUrl: folder ? folder.getUrl() : '', copperUrl: copperOppUrl_(opp.id) };
+}
+
+/**
+ * Pure core of change-only gate logging. prevState = { sig: {rowKey: signature} } or null.
+ * Row key = result family + gate (pass/fail share one key so a flip is a change). Signature = result + detail
+ * (detail carries the missing list). Returns { changed: rows to write, state: new state }.
+ */
+function gateDiffRows_(prevState, rows) {
+  var prev = (prevState && prevState.sig) || {};
+  var next = {}, changed = [];
+  (rows || []).forEach(function (row) {
+    var result = row[0], gateKey = row[1], detail = row[4];
+    var fam = (result === 'pass' || result === 'fail') ? 'eval' : result;
+    var k = fam + ':' + gateKey;
+    var sig = gateSigHash_(result + '|' + detail);
+    next[k] = sig;
+    if (prev[k] !== sig) changed.push(row);
+  });
+  return { changed: changed, state: { sig: next } };
+}
+
+/** Pure: short 32-bit FNV-1a hash (base36) so per-deal state stays tiny (Script Properties cap 500 KB total). */
+function gateSigHash_(str) {
+  var h = 0x811c9dc5;
+  for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0; }
+  return h.toString(36);
+}
+
+/** Change-only gate logging, state per deal in Script Properties ('gateLog_<oppId>', a few hundred bytes each). */
+function gateChangedRows_(oppId, rows) {
+  var props = PropertiesService.getScriptProperties();
+  var key = 'gateLog_' + oppId, prev = null;
+  try { prev = JSON.parse(props.getProperty(key) || 'null'); } catch (e) { prev = null; }
+  var d = gateDiffRows_(prev, rows);
+  var json = JSON.stringify(d.state);
+  if (json.length > 8500) json = JSON.stringify({ sig: {} });   // stay under the 9 KB per-value limit
+  if (d.changed.length || !prev) props.setProperty(key, json);
+  return d.changed;
 }
 
 /** Poll / webhook entry: find folder, inventory, apply gates. */
@@ -291,15 +354,16 @@ function sweepParkedDeals() {
 
   var sh = logSheet_(CONFIG.GATES.PARKED_SHEET, PARKED_HEADERS_);
   var prev = {};
-  sh.getDataRange().getValues().slice(1).forEach(function (row) { prev[row[1]] = row[11]; });   // opp_id -> first_parked
+  sh.getDataRange().getValues().slice(1).forEach(function (row) { prev[row[1]] = row[11]; });   // opp_id -> first_parked (col 0 is timestamp)
 
-  var rows = [];
+  var rows = [], done = {};
   cands.forEach(function (o) {
     if (CONFIG.LOST_STATUSES.indexOf(o.status) !== -1) return;   // Production deals are usually status Won
     try {
       var res = maybeApplyDocumentationGates_(o);
-      var p = res && res.parked;
-      if (!p) return;
+      var p = res && (res.parked || res.pastGate);
+      if (!p || done[p.oppId]) return;   // one row per deal
+      done[p.oppId] = true;
       rows.push([new Date(), p.oppId, p.name, p.owner, p.ownerEmail, p.gate, p.stage, p.missing, p.recommended,
                  p.folderUrl, p.copperUrl, prev[p.oppId] || new Date(), new Date()]);
     } catch (e) { logRow_('error', [o.id, 'parked sweep', String(e)]); }
