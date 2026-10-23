@@ -65,7 +65,7 @@ function installNightlyTrigger() {
   Logger.log('Nightly reconcile trigger installed (2 AM ' + CONFIG.TIMEZONE + ')');
 }
 
-function installTriggers() { installPollTrigger(); installNightlyTrigger(); }
+function installTriggers() { installPollTrigger(); installNightlyTrigger(); installStageTimerTrigger(); }
 
 function deleteTriggersFor_(fn) {
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === fn) ScriptApp.deleteTrigger(t); });

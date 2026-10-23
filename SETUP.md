@@ -22,6 +22,7 @@ Replaces the Zapier zap "Copper CRM -> Create Google Drive Folder on New Opportu
 | `Handlers.gs` | Webhook receiver (`doPost`), polling, log sheet |
 | `Reconcile.gs` | Dry-run plan and bulk rename of existing folders (resumable) |
 | `Scoring.gs` | Documentation score |
+| `StageTimers.gs` | Timed stage moves (Product Shipped -> Send 2nd Invoice after 7 days) |
 | `Setup.gs` | Install helpers |
 | `appsscript.json` | Manifest (scopes, web app settings) |
 
@@ -34,7 +35,7 @@ Replaces the Zapier zap "Copper CRM -> Create Google Drive Folder on New Opportu
 5. In `Config.gs`, put the API key into `setSecrets()`, run `setSecrets` once from the editor (authorize when prompted), then delete the key from the code.
 6. Run `checkSetup` and read the log (View > Logs / Executions). Every custom field should say OK and every dropdown option should show a code.
 7. Run `testOneOpportunity`. It prints the name the Bay Advanced Technologies folder would get, without changing anything.
-8. Run `installPollTrigger` (5 minute poll). Do not install the nightly reconcile until the migration has been reviewed and executed; then run `installNightlyTrigger`.
+8. Run `installPollTrigger` (5 minute poll). Do not install the nightly reconcile until the migration has been reviewed and executed; then run `installNightlyTrigger`. Run `advanceAgedStagesDryRun` and read the log, then `installStageTimerTrigger` (daily 6 AM stage mover).
 9. Optional webhooks (only if the Workspace allows web apps with access "Anyone"; TotalShield's policy currently does not): Deploy > New deployment > Web app (Execute as Me, Anyone), then `registerWebhooks('PASTE_EXEC_URL')`.
 10. Parallel run: with the Zap still on, create a throwaway opportunity and confirm the script renames the Zap's folder rather than duplicating it. `CONFIG.SYNC_CREATED_AFTER` limits the poll to records created after a timestamp so existing folders are untouched during this phase.
 11. Turn the Zapier zap **off**. Create a test opportunity in Copper and confirm the folder appears within a minute with all subfolders and the link on the record.

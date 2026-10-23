@@ -127,7 +127,8 @@ var LOG_HEADERS_ = {
   error: ['opp_id', 'where', 'error'],
   poll: ['what', 'count'],
   score: ['opp_id', 'folder', 'score', 'max', 'breakdown'],
-  gate: ['opp_id', 'result', 'gate_key', 'pipeline', 'stage', 'detail']
+  gate: ['opp_id', 'result', 'gate_key', 'pipeline', 'stage', 'detail'],
+  stage_timer: ['opp_id', 'name', 'from_stage', 'to_stage', 'days_in_stage', 'result']
 };
 
 function logRow_(kind, cells) {

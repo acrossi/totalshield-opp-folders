@@ -15,6 +15,10 @@ scores how completely each finished project's folder is documented.
   the RE-RUN web app and File Bot's on-demand call).
 - Mirrors the Copper Production pipeline onto a shared calendar
   (`Calendar.gs`).
+- Moves a Production opportunity from "Product Shipped" to "Send 2nd Invoice"
+  once it has sat there 7 days (`StageTimers.gs`, daily 6 AM trigger; the
+  age is Copper's own stage-change timestamp, so a record moved back by hand
+  gets a fresh 7 days). Rules live in `STAGE_TIMERS`.
 
 Install, triggers and operations: [SETUP.md](SETUP.md). The full history,
 decisions and Drive/Copper IDs are in the Obsidian vault note
