@@ -21,10 +21,10 @@ function advanceAgedStagesDryRun() { return advanceAgedStages_({ dryRun: true })
 
 function advanceAgedStages_(opts) {
   opts = opts || {};
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(5000)) { Logger.log('advanceAgedStages: another run holds the lock'); return []; }
+  // No script lock: the 5-minute poll holds it for minutes at a time, and this
+  // job only reads Copper and changes a stage, which the poll can run alongside.
   var moved = [];
-  try {
+  {
     var pipelines = copperPipelines_().byName;
     var now = Math.floor(Date.now() / 1000);
     STAGE_TIMERS.forEach(function (rule) {
@@ -55,7 +55,7 @@ function advanceAgedStages_(opts) {
       });
     });
     logRow_('poll', ['stage_timer' + (opts.dryRun ? ' dry-run' : ''), moved.length]);
-  } finally { lock.releaseLock(); }
+  }
   Logger.log((opts.dryRun ? 'Would move ' : 'Moved ') + moved.length + ' opportunit' + (moved.length === 1 ? 'y' : 'ies'));
   return moved;
 }
