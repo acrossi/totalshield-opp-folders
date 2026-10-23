@@ -85,6 +85,7 @@ function pollRecentOpportunities() {
         syncOpportunity_(o, { companyCache: cache });
         if (shouldScore_(o) && !hasScore_(o)) scoreOpportunity_(o);
         else maybeApplyDocumentationGates_(o);
+        syncAutoAdvanceField_(o);   // StageTimers.gs: keep the "Auto-advance on" date current
       } catch (e) { logRow_('error', [o.id, 'poll', String(e)]); }
     });
     logRow_('poll', ['synced', opps.length]);
@@ -125,7 +126,7 @@ var LOG_HEADERS_ = {
   sync: ['opp_id', 'action', 'old_name', 'new_name', 'bucket_from>to', 'link', 'company'],
   webhook: ['type', 'event', 'ids', 'updated_attributes'],
   error: ['opp_id', 'where', 'error'],
-  poll: ['what', 'count'],
+  poll: ['what', 'count', 'extra'],
   score: ['opp_id', 'folder', 'score', 'max', 'breakdown'],
   gate: ['opp_id', 'result', 'gate_key', 'pipeline', 'stage', 'detail'],
   stage_timer: ['opp_id', 'name', 'from_stage', 'to_stage', 'days_in_stage', 'result']
